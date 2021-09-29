@@ -6,4 +6,4 @@ RUN mkdir -p /common
 
 COPY ./ /common
 
-CMD sleep 3600
+CMD pwsh -c ./common/TestResources/deploy-stress-test.ps1
