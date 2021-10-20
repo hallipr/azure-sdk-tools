@@ -75,7 +75,7 @@ namespace Azure.Sdk.Tools.IdentityResolver
 
                     if (!String.IsNullOrEmpty(targetvar))
                     {
-                        Console.WriteLine(String.Format("##vso[task.setvariable variable={0};]{1}", targetvar, result.GithubUserName));
+                        Console.WriteLine(String.Format("##vso[task.setvariable variable={0};]{1}", targetvar, JsonConvert.SerializeObject(result)));
                     }
                     if (result != default(IdentityDetail))
                     {
