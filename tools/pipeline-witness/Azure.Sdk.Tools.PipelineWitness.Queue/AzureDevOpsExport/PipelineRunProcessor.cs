@@ -1,28 +1,27 @@
-﻿namespace Azure.Sdk.Tools.PipelineWitness
+﻿using System;
+using System.Linq;
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+
+using Azure.Sdk.Tools.PipelineWitness.Common;
+using Azure.Storage.Blobs;
+
+using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.Extensibility;
+using Microsoft.Extensions.Logging;
+using Microsoft.TeamFoundation.Build.WebApi;
+using Microsoft.TeamFoundation.TestManagement.WebApi;
+using Microsoft.VisualStudio.Services.TestResults.WebApi;
+
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+using Newtonsoft.Json.Serialization;
+
+namespace Azure.Sdk.Tools.PipelineWitness.Queue.AzureDevOpsExport
 {
-    using System;
-    using System.IO;
-    using System.Linq;
-    using System.Net;
-    using System.Text;
-    using System.Text.RegularExpressions;
-    using System.Threading.Tasks;
-
-    using Azure.Sdk.Tools.PipelineWitness.Services;
-    using Azure.Storage.Blobs;
-    using Azure.Storage.Blobs.Models;
-
-    using Microsoft.Extensions.Logging;
-    using Microsoft.TeamFoundation.Build.WebApi;
-    using Microsoft.TeamFoundation.TestManagement.WebApi;
-    using Microsoft.VisualStudio.Services.TestResults.WebApi;
-    using Microsoft.WindowsAzure.Storage;
-
-    using Newtonsoft.Json;
-    using Newtonsoft.Json.Converters;
-    using Newtonsoft.Json.Serialization;
-
-    public class BlobUploadProcessor
+    public class PipelineRunProcessor
     {
         private const string BuildsContainerName = "builds";
         private const string BuildLogLinesContainerName = "buildloglines";
@@ -37,7 +36,7 @@
             Formatting = Formatting.None,
         };
 
-        private readonly ILogger<BlobUploadProcessor> logger;
+        private readonly ILogger<PipelineRunProcessor> logger;
         private readonly BuildLogProvider logProvider;
         private readonly TestResultsHttpClient testResultsClient;
         private readonly BuildHttpClient buildClient;
@@ -46,7 +45,12 @@
         private readonly BlobContainerClient buildTimelineRecordsContainerClient;
         private readonly BlobContainerClient testRunsContainerClient;
 
-        public BlobUploadProcessor(ILogger<BlobUploadProcessor> logger, BuildLogProvider logProvider, BlobServiceClient blobServiceClient, BuildHttpClient buildClient, TestResultsHttpClient testResultsClient)
+        public PipelineRunProcessor(
+            ILogger<PipelineRunProcessor> logger,
+            BuildLogProvider logProvider,
+            BlobServiceClient blobServiceClient,
+            BuildHttpClient buildClient,
+            TestResultsHttpClient testResultsClient)
         {
             if (blobServiceClient == null)
             {
@@ -101,9 +105,9 @@
                 throw new ArgumentException("build.Project.Name is null or whitespace", nameof(build));
             }
 
-            await UploadBuildBlobAsync(account, build);
+            await ProcessBuildAsync(account, build);
 
-            await UploadTestRunBlobsAsync(account, build);
+            await ProcessTestRunsAsync(account, build);
 
             if (timeline == null)
             {
@@ -111,7 +115,7 @@
             }
             else
             {
-                await UploadTimelineBlobAsync(account, build, timeline);
+                await ProcessTimelineAsync(account, build, timeline);
             }
 
             var logs = await buildClient.GetBuildLogsAsync(build.Project.Id, build.Id);
@@ -124,12 +128,12 @@
             {
                 foreach (var log in logs)
                 {
-                    await UploadLogLinesBlobAsync(account, build, log);
+                    await ProcessLogLinesAsync(account, build, log);
                 }
             }
         }
 
-        private async Task UploadBuildBlobAsync(string account, Build build)
+        private async Task ProcessBuildAsync(string account, Build build)
         {
             try
             {
@@ -217,7 +221,7 @@
             }
         }
 
-        private async Task UploadTimelineBlobAsync(string account, Build build, Timeline timeline)
+        private async Task ProcessTimelineAsync(string account, Build build, Timeline timeline)
         {
             try
             {
@@ -295,7 +299,7 @@
             }
         }
 
-        private async Task UploadLogLinesBlobAsync(string account, Build build, BuildLog log)
+        private async Task ProcessLogLinesAsync(string account, Build build, BuildLog log)
         {
             try
             {
@@ -330,23 +334,22 @@
                         throw new Exception($"Error processing line {lineNumber}. No leading timestamp.");
                     }
 
-                    messagesWriter.AppendLine(JsonConvert.SerializeObject(
-                        new
-                        {
-                            OrganizationName = account,
-                            ProjectId = build.Project?.Id,
-                            ProjectName = build.Project?.Name,
-                            BuildDefinitionId = build.Definition?.Id,
-                            BuildDefinitionPath = build.Definition?.Path,
-                            BuildDefinitionName = build.Definition?.Name,
-                            BuildId = build.Id,
-                            LogId = log.Id,
-                            LineNumber = lineNumber,
-                            Length = message.Length,
-                            Timestamp = timestamp?.ToString(TimeFormat),
-                            Message = message,
-                            EtlIngestDate = DateTime.UtcNow.ToString(TimeFormat),
-                        }, jsonSettings));
+                    messagesWriter.AppendLine(JsonConvert.SerializeObject(new
+                    {
+                        OrganizationName = account,
+                        ProjectId = build.Project?.Id,
+                        ProjectName = build.Project?.Name,
+                        BuildDefinitionId = build.Definition?.Id,
+                        BuildDefinitionPath = build.Definition?.Path,
+                        BuildDefinitionName = build.Definition?.Name,
+                        BuildId = build.Id,
+                        LogId = log.Id,
+                        LineNumber = lineNumber,
+                        Length = message.Length,
+                        Timestamp = timestamp?.ToString(TimeFormat),
+                        Message = message,
+                        EtlIngestDate = DateTime.UtcNow.ToString(TimeFormat),
+                    }, jsonSettings));
 
                     lastTimeStamp = timestamp;
                 }
@@ -364,7 +367,7 @@
             }
         }
 
-        private async Task UploadTestRunBlobsAsync(string account, Build build)
+        private async Task ProcessTestRunsAsync(string account, Build build)
         {
             try
             {
@@ -385,7 +388,7 @@
 
                     foreach (var testRun in page)
                     {
-                        await UploadTestRunBlobAsync(account, build, testRun);
+                        await ProcessTestRunAsync(account, build, testRun);
                     }
 
                     continuationToken = page.ContinuationToken;
@@ -398,7 +401,7 @@
             }
         }
 
-        private async Task UploadTestRunBlobAsync(string account, Build build, TestRun testRun)
+        private async Task ProcessTestRunAsync(string account, Build build, TestRun testRun)
         {
             try
             {
