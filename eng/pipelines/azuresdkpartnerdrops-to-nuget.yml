@@ -1,18 +1,46 @@
-parameters:
-- name: BlobPath
-  displayName: 'Relative Path in Partner Drops Blob Container'
-  type: string
-  default: '<team>/dotnet/<version>'
-- name: ShouldSign
-  type: string
-  default: true
-- name: ShouldPublish
-  type: string
-  default: true
 
-extends:
-  template: /eng/pipelines/templates/jobs/azuresdkpartnerdrops-to-nugetfeed.yml
-  parameters:
-    PartnerDropsBlobSourceSuffix: ${{ parameters.BlobPath }}
-    ShouldSign: ${{ parameters.ShouldSign }}
-    ShouldPublish: ${{ parameters.ShouldPublish }}
+resources:
+  repositories:
+    - repository: azure-sdk-build-tools
+      type: git
+      name: internal/azure-sdk-build-tools
+      ref: refs/heads/users/pahallis/windowspdb
+
+parameters:
+  - name: BuildId
+    type: string
+
+variables:
+  - template: /eng/pipelines/templates/variables/globals.yml
+
+jobs:
+  - job: AzurePartnerDropsToNuget
+    pool:
+      name: azsdk-pool-mms-win-2022-general
+      vmImage: windows-2022
+
+    steps:
+      - checkout: self
+      - checkout: azure-sdk-build-tools
+
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          buildType: 'specific'
+          buildVersionToDownload: 'specific'
+          project: 'internal'
+          definition: '1191'
+          buildId: ${{ parameters.BuildId }}
+          artifactName: 'packages-signed'
+          targetPath: '$(Build.ArtifactStagingDirectory)/packages-signed'
+
+      - ${{ if eq(parameters.ShouldPublish, true) }}:
+        - template: pipelines/steps/publish-symbols.yml@azure-sdk-build-tools
+          parameters:
+            BuildToolsRepositoryPath: '$(Build.SourcesDirectory)/azure-sdk-build-tools'
+            PackagesPath: $(Build.ArtifactStagingDirectory)/packages-signed
+            StagingDirectory: $(Build.ArtifactStagingDirectory)/symbols
+
+      - publish: $(Build.ArtifactStagingDirectory)
+        displayName: Upload Packages to Artifacts
+        artifact: packages
+        condition: succeeded()
