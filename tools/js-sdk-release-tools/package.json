@@ -58,7 +58,7 @@
     "tsx": "^4.19.3",
     "typescript": "5.8.2",
     "vitest": "3.0.9",
-    "@typespec/compiler": "^0.67.1"
+    "@typespec/compiler": "^1.10.0"
   },
   "optionalDependencies": {
     "@rollup/rollup-android-arm-eabi": "4.20.0",
